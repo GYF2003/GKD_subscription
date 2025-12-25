@@ -1,0 +1,58 @@
+name: 清理工作流运行记录
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  RETENTION_DAYS: 2
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    
+    steps:
+      - name: 检查运行环境
+        run: |
+          echo "当前时间: $(date)"
+          echo "UTC时间: $(date -u)"
+          echo "保留天数: ${{ env.RETENTION_DAYS }}"
+      
+      - name: 删除旧的工作流运行
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 计算截止日期（2天前，UTC时间）
+          CUTOFF_DATE=$(date -u -d"${{ env.RETENTION_DAYS }} days ago" +'%Y-%m-%dT%H:%M:%SZ')
+          echo "将删除早于以下时间的运行记录: $CUTOFF_DATE"
+          
+          # 获取所有工作流
+          echo "获取工作流列表..."
+          workflows=$(gh api "repos/${{ github.repository }}/actions/workflows" --paginate --jq '.workflows[].id')
+          
+          for workflow_id in $workflows; do
+            echo "处理工作流 ID: $workflow_id"
+            
+            # 获取该工作流中需要删除的运行记录
+            runs_to_delete=$(gh api "repos/${{ github.repository }}/actions/workflows/$workflow_id/runs?per_page=100" \
+              --paginate \
+              --jq ".workflow_runs[] | select(.status != \"in_progress\" and .status != \"queued\" and .status != \"waiting\") | select(.created_at < \"$CUTOFF_DATE\") | .id")
+            
+            for run_id in $runs_to_delete; do
+              echo "  删除运行记录: $run_id"
+              gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$run_id" || echo "  删除失败，跳过: $run_id"
+              sleep 0.5  # 避免触发GitHub API速率限制
+            done
+          done
+          
+          echo "清理完成!"
+      
+      - name: 输出统计信息
+        run: |
+          echo "=== 清理完成 ==="
+          echo "执行时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "时区: $(cat /etc/timezone 2>/dev/null || echo 'UTC')"
+          echo "保留天数: ${{ env.RETENTION_DAYS }}"
