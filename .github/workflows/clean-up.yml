@@ -52,6 +52,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "等待60秒，确保当前运行记录完成..."
+          sleep 60
+
           CUTOFF_DATE=$(date -u -d "${RETENTION_DAYS} days ago" +'%Y-%m-%d %H:%M:%SZ')
           echo "将删除早于以下时间的运行记录: $CUTOFF_DATE"
 
@@ -77,7 +80,6 @@ jobs:
               gh api "repos/${{ github.repository }}/actions/workflows/${WORKFLOW_ID}/runs" \
                 --paginate \
                 --jq ".workflow_runs[]
-                  | select(.status | IN(\"completed\", \"cancelled\", \"failure\", \"success\"))
                   | select(.created_at < \"$CUTOFF_DATE\")
                   | .id"
             )
@@ -91,8 +93,10 @@ jobs:
             TOTAL_DELETED=$((TOTAL_DELETED + ${#RUNS[@]}))
 
             for RUN_ID in "${RUNS[@]}"; do
+              echo "    删除运行记录 ID: $RUN_ID"
               for ((i=1;i<=API_RETRY_COUNT;i++)); do
                 if gh api -X DELETE "repos/${{ github.repository }}/actions/runs/${RUN_ID}" >/dev/null 2>&1; then
+                  echo "    删除成功"
                   break
                 fi
                 echo "    删除失败，重试 $i/$API_RETRY_COUNT"
